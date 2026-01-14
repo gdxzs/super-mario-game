@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>超级马里奥风格冒险</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #202020;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* 防止手机端双击缩放 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        canvas {
+            display: block;
+            background-color: #5c94fc; /* 经典马里奥天空蓝 */
+            image-rendering: pixelated; /* 保持像素清晰 */
+        }
+
+        /* UI 覆盖层 */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .hud {
+            display: flex;
+            justify-content: space-between;
+            padding: 20px;
+            color: white;
+            font-weight: bold;
+            font-size: 24px;
+            text-shadow: 2px 2px 0 #000;
+            font-family: monospace;
+        }
+
+        #start-screen, #game-over-screen, #victory-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            pointer-events: auto;
+            z-index: 10;
+        }
+
+        h1 {
+            font-size: 40px;
+            margin-bottom: 20px;
+            text-shadow: 4px 4px 0 #e70012;
+            color: #fff;
+            text-transform: uppercase;
+        }
+
+        button {
+            padding: 15px 40px;
+            font-size: 20px;
+            background: #e70012;
+            color: white;
+            border: 4px solid white;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+            box-shadow: 0 4px 0 #900;
+            transition: transform 0.1s;
+        }
+
+        button:active {
+            transform: translateY(4px);
+            box-shadow: 0 0 0 #900;
+        }
+
+        /* 移动端控制 */
+        #mobile-controls {
+            display: none;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .control-btn {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.3);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            pointer-events: auto;
+            touch-action: manipulation;
+        }
+        
+        .control-btn:active {
+            background: rgba(255, 255, 255, 0.6);
+        }
+
+        #d-pad {
+            bottom: 30px;
+            left: 30px;
+            width: 140px;
+            height: 140px;
+            position: absolute;
+        }
+
+        #btn-left { bottom: 40px; left: 0px; width: 60px; height: 60px; }
+        #btn-right { bottom: 40px; left: 80px; width: 60px; height: 60px; }
+        #btn-jump { bottom: 40px; right: 30px; width: 80px; height: 80px; background: rgba(231, 0, 18, 0.4); border-color: rgba(231, 0, 18, 0.6); }
+
+        @media (hover: none) and (pointer: coarse) {
+            #mobile-controls { display: block; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="800" height="450"></canvas>
+    
+    <div id="ui-layer">
+        <div class="hud">
+            <div id="score">分数: 000000</div>
+            <div id="coins">金币: 00</div>
+            <div id="world">世界: 1-1</div>
+            <div id="time">时间: 300</div>
+        </div>
+        
+        <div id="mobile-controls">
+            <div id="d-pad">
+                <div id="btn-left" class="control-btn"></div>
+                <div id="btn-right" class="control-btn"></div>
+            </div>
+            <div id="btn-jump" class="control-btn"></div>
+        </div>
+    </div>
+
+    <div id="start-screen">
+        <h1>超级马里奥风格冒险</h1>
+        <p style="margin-bottom: 30px; color: #ddd;">使用 方向键移动，空格键跳跃</p>
+        <button onclick="game.start()">开始游戏</button>
+    </div>
+
+    <div id="game-over-screen" style="display: none;">
+        <h1>游戏结束</h1>
+        <button onclick="game.reset()">重试</button>
+    </div>
+
+    <div id="victory-screen" style="display: none;">
+        <h1>关卡完成！</h1>
+        <p id="final-score" style="font-size: 24px; margin-bottom: 20px;">最终得分: 0</p>
+        <button onclick="game.reset()">再玩一次</button>
+    </div>
+</div>
+
+<script>
+/**
+ * 游戏引擎与逻辑
+ */
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.width = this.canvas.width;
+        this.height = this.canvas.height;
+        
+        this.lastTime = 0;
+        this.isGameOver = false;
+        this.isVictory = false;
+        this.isPlaying = false;
+        
+        this.score = 0;
+        this.coins = 0;
+        this.timeLeft = 300;
+        this.timeTick = 0;
+
+        // 输入状态
+        this.keys = {
+            left: false,
+            right: false,
+            up: false,
+            down: false,
+            jump: false
+        };
+
+        this.entities = [];
+        this.particles = [];
+        this.tiles = [];
+        this.camera = { x: 0, y: 0 };
+        this.gravity = 0.5;
+        this.tileSize = 32;
+
+        this.setupInput();
+        this.loadAssets();
+    }
+
+    loadAssets() {
+        // 由于是单文件，我们通过代码绘制，不需要加载图片
+        this.colors = {
+            sky: '#5c94fc',
+            ground: '#c84c0c',
+            brick: '#b03010', // 红色砖块
+            block: '#e89460', // 问号方块底色
+            pipe: '#80d010',
+            pipeDark: '#008000',
+            marioRed: '#e70012',
+            marioBlue: '#2040c0',
+            marioSkin: '#fccfa0',
+            goomba: '#8f4f30'
+        };
+    }
+
+    setupInput() {
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') this.keys.left = true;
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') this.keys.right = true;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Space') {
+                if (!this.keys.jump) {
+                    this.keys.jump = true;
+                    if (this.player && this.isPlaying) this.player.jump();
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') this.keys.left = false;
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') this.keys.right = false;
+            if (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Space') this.keys.jump = false;
+        });
+
+        // 触摸控制
+        const bindTouch = (id, key) => {
+            const el = document.getElementById(id);
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); this.keys[key] = true; if(key === 'jump' && this.player) this.player.jump(); });
+            el.addEventListener('touchend', (e) => { e.preventDefault(); this.keys[key] = false; });
+        };
+        bindTouch('btn-left', 'left');
+        bindTouch('btn-right', 'right');
+        bindTouch('btn-jump', 'jump');
+    }
+
+    start() {
+        document.getElementById('start-screen').style.display = 'none';
+        document.getElementById('game-over-screen').style.display = 'none';
+        document.getElementById('victory-screen').style.display = 'none';
+        this.resetGameData();
+        this.loadLevel(level1);
+        this.isPlaying = true;
+        this.gameLoop(0);
+    }
+
+    reset() {
+        this.start();
+    }
+
+    resetGameData() {
+        this.score = 0;
+        this.coins = 0;
+        this.timeLeft = 300;
+        this.isGameOver = false;
+        this.isVictory = false;
+    }
+
+    loadLevel(mapString) {
+        this.entities = [];
+        this.tiles = [];
+        this.particles = [];
+        
+        const rows = mapString.trim().split('\n');
+        for (let y = 0; y < rows.length; y++) {
+            const row = rows[y];
+            for (let x = 0; x < row.length; x++) {
+                const char = row[x];
+                const posX = x * this.tileSize;
+                const posY = y * this.tileSize;
+
+                if (char === '#') this.tiles.push(new Tile(posX, posY, this.tileSize, 'ground'));
+                else if (char === 'B') this.tiles.push(new Tile(posX, posY, this.tileSize, 'brick'));
+                else if (char === '?') this.tiles.push(new Tile(posX, posY, this.tileSize, 'question'));
+                else if (char === 'W') this.tiles.push(new Tile(posX, posY, this.tileSize, 'wall')); // 硬方块
+                else if (char === 'P') this.tiles.push(new Tile(posX, posY, this.tileSize, 'pipe_ul')); // 水管左上
+                else if (char === 'p') this.tiles.push(new Tile(posX, posY, this.tileSize, 'pipe_ur')); // 水管右上
+                else if (char === '[') this.tiles.push(new Tile(posX, posY, this.tileSize, 'pipe_bl')); // 水管左下
+                else if (char === ']') this.tiles.push(new Tile(posX, posY, this.tileSize, 'pipe_br')); // 水管右下
+                else if (char === 'F') this.tiles.push(new Tile(posX, posY, this.tileSize, 'flagpole')); 
+                else if (char === 'T') this.tiles.push(new Tile(posX, posY, this.tileSize, 'flagtop')); 
+                else if (char === '@') {
+                    this.player = new Player(posX, posY);
+                    this.entities.push(this.player);
+                } else if (char === 'E') {
+                    this.entities.push(new Goomba(posX, posY));
+                } else if (char === 'C') {
+                    this.entities.push(new Coin(posX, posY));
+                }
+            }
+        }
+    }
+
+    gameLoop(timestamp) {
+        if (!this.isPlaying) return;
+
+        const dt = timestamp - this.lastTime;
+        this.lastTime = timestamp;
+
+        this.update(dt);
+        this.draw();
+
+        if (!this.isGameOver) {
+            requestAnimationFrame((t) => this.gameLoop(t));
+        }
+    }
+
+    update(dt) {
+        if (this.isVictory) {
+            // 简单的胜利逻辑等待
+            return;
+        }
+
+        // 时间逻辑
+        this.timeTick++;
+        if (this.timeTick > 60) {
+            this.timeLeft--;
+            this.timeTick = 0;
+            if (this.timeLeft <= 0) this.gameOver();
+        }
+
+        // 实体更新
+        this.entities.forEach(entity => entity.update(this));
+        
+        // 移除死亡实体
+        this.entities = this.entities.filter(e => !e.markedForDeletion);
+        
+        // 粒子更新
+        this.particles.forEach(p => p.update());
+        this.particles = this.particles.filter(p => p.life > 0);
+        this.tiles = this.tiles.filter(t => !t.markedForDeletion);
+
+        // 相机跟随
+        if (this.player) {
+            let targetX = this.player.x - this.width / 2;
+            // 限制相机边界
+            targetX = Math.max(0, targetX);
+            // 简单平滑
+            this.camera.x += (targetX - this.camera.x) * 0.1;
+            
+            // 掉落死亡
+            if (this.player.y > this.height + 100) {
+                this.gameOver();
+            }
+        }
+
+        this.updateUI();
+    }
+
+    updateUI() {
+        document.getElementById('score').innerText = '分数: ' + this.score.toString().padStart(6, '0');
+        document.getElementById('coins').innerText = '金币: ' + this.coins.toString().padStart(2, '0');
+        document.getElementById('time').innerText = '时间: ' + this.timeLeft;
+    }
+
+    draw() {
+        // 绘制背景（天空）
+        this.ctx.fillStyle = this.colors.sky;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+
+        // 绘制装饰性云朵 (视差滚动)
+        this.drawClouds();
+
+        this.ctx.save();
+        this.ctx.translate(-Math.floor(this.camera.x), 0);
+
+        // 绘制方块
+        this.tiles.forEach(tile => tile.draw(this.ctx, this));
+
+        // 绘制实体
+        this.entities.forEach(entity => entity.draw(this.ctx));
+
+        // 绘制粒子
+        this.particles.forEach(p => p.draw(this.ctx));
+
+        this.ctx.restore();
+    }
+
+    drawClouds() {
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+        const cloudSpeed = 0.5;
+        // 简单的背景层绘制
+        for (let i = 0; i < 5; i++) {
+            let x = ((Date.now() * 0.05 * (i+1) + i * 200) % (this.width + 400)) - 200;
+            let y = 50 + i * 40;
+            this.ctx.beginPath();
+            this.ctx.arc(x, y, 30, 0, Math.PI * 2);
+            this.ctx.arc(x + 25, y - 10, 35, 0, Math.PI * 2);
+            this.ctx.arc(x + 50, y, 30, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+    }
+
+    addParticle(x, y, color, speedX, speedY) {
+        this.particles.push(new Particle(x, y, color, speedX, speedY));
+    }
+
+    createBrickDebris(x, y) {
+        this.addParticle(x, y, this.colors.brick, -2, -4);
+        this.addParticle(x, y, this.colors.brick, 2, -4);
+        this.addParticle(x, y, this.colors.brick, -2, -2);
+        this.addParticle(x, y, this.colors.brick, 2, -2);
+    }
+
+    gameOver() {
+        if (this.isGameOver) return;
+        this.isGameOver = true;
+        this.isPlaying = false;
+        document.getElementById('game-over-screen').style.display = 'flex';
+    }
+
+    victory() {
+        if (this.isVictory) return;
+        this.isVictory = true;
+        // 玩家自动走向城堡
+        this.score += this.timeLeft * 10;
+        document.getElementById('final-score').innerText = '最终得分: ' + this.score;
+        setTimeout(() => {
+            document.getElementById('victory-screen').style.display = 'flex';
+        }, 1000);
+    }
+}
+
+/**
+ * 基础实体类
+ */
+class Entity {
+    constructor(x, y, width, height) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        this.vx = 0;
+        this.vy = 0;
+        this.markedForDeletion = false;
+        this.onGround = false;
+    }
+
+    update(game) {
+        // 重力
+        this.vy += game.gravity;
+        
+        // 水平移动检测
+        this.x += this.vx;
+        this.handleCollisions(game, 'x');
+
+        // 垂直移动检测
+        this.y += this.vy;
+        this.onGround = false;
+        this.handleCollisions(game, 'y');
+    }
+
+    handleCollisions(game, axis) {
+        for (let tile of game.tiles) {
+            if (this.checkCollision(this, tile)) {
+                if(tile.type === 'flagpole') {
+                    if (this instanceof Player) game.victory();
+                    continue; // 旗杆不阻挡物理
+                }
+                if(tile.type === 'flagtop') continue;
+
+                if (axis === 'x') {
+                    if (this.vx > 0) this.x = tile.x - this.width;
+                    if (this.vx < 0) this.x = tile.x + tile.width;
+                    if (this instanceof Goomba) this.vx *= -1; // 敌人撞墙反弹
+                    this.vx = 0;
+                } else {
+                    if (this.vy > 0) { // 下落
+                        this.y = tile.y - this.height;
+                        this.onGround = true;
+                        this.vy = 0;
+                    } else if (this.vy < 0) { // 顶头
+                        this.y = tile.y + tile.height;
+                        this.vy = 0;
+                        if (this instanceof Player) this.headBump(game, tile);
+                    }
+                }
+            }
+        }
+    }
+
+    checkCollision(rect1, rect2) {
+        return (
+            rect1.x < rect2.x + rect2.width &&
+            rect1.x + rect1.width > rect2.x &&
+            rect1.y < rect2.y + rect2.height &&
+            rect1.y + rect1.height > rect2.y
+        );
+    }
+    
+    draw(ctx) {}
+}
+
+/**
+ * 玩家类
+ */
+class Player extends Entity {
+    constructor(x, y) {
+        super(x, y, 26, 30); // 稍小于瓦片
+        this.speed = 4;
+        this.jumpForce = -13; // 修改：增加跳跃力度 (原为 -11)，跳得更高
+        this.isDead = false;
+        this.facingRight = true;
+        this.animTimer = 0;
+        this.jumpCount = 0; // 新增：跳跃计数
+    }
+
+    update(game) {
+        if (this.isDead) return;
+
+        // 输入处理
+        if (game.keys.left) {
+            this.vx = -this.speed;
+            this.facingRight = false;
+        } else if (game.keys.right) {
+            this.vx = this.speed;
+            this.facingRight = true;
+        } else {
+            this.vx = 0;
+        }
+
+        super.update(game);
+        
+        // 新增：落地时重置跳跃次数
+        if (this.onGround) {
+            this.jumpCount = 0;
+        }
+        
+        // 实体碰撞（敌人、金币）
+        game.entities.forEach(e => {
+            if (e === this || e.markedForDeletion) return;
+            
+            if (this.checkCollision(this, e)) {
+                if (e instanceof Goomba) {
+                    // 踩踏判定：玩家在下落且位置在敌人上方
+                    const hitFromTop = this.y + this.height < e.y + e.height / 2 + 10 && this.vy > 0;
+                    
+                    if (hitFromTop) {
+                        e.die(game);
+                        this.vy = -5; // 小跳
+                        game.score += 100;
+                    } else {
+                        this.die(game);
+                    }
+                } else if (e instanceof Coin) {
+                    e.collect(game);
+                }
+            }
+        });
+
+        // 边界限制
+        if (this.x < 0) this.x = 0;
+    }
+
+    jump() {
+        // 修改：二段跳逻辑
+        if (this.jumpCount < 2) {
+            this.vy = this.jumpForce;
+            this.jumpCount++;
+            
+            // 如果是空中起跳（二段跳），可以加一点特效（这里通过重置onGround防止逻辑冲突）
+            this.onGround = false; 
+        }
+    }
+
+    headBump(game, tile) {
+        if (tile.type === 'brick') {
+            game.createBrickDebris(tile.x + 16, tile.y + 16);
+            tile.markedForDeletion = true;
+            game.score += 50;
+        } else if (tile.type === 'question') {
+            tile.type = 'wall'; // 变成硬方块
+            game.score += 100;
+            game.coins++;
+            // 生成金币动画
+            game.addParticle(tile.x + 16, tile.y - 16, '#ffd700', 0, -5);
+        }
+    }
+
+    die(game) {
+        this.isDead = true;
+        // 死亡动画：跳起落下
+        this.vy = -8;
+        this.markedForDeletion = false; // 暂时保留以播放动画
+        
+        // 将玩家从物理碰撞中移除，仅保留简单绘制逻辑
+        // 这里简化处理，直接调用 Game Over
+        setTimeout(() => game.gameOver(), 500);
+    }
+
+    draw(ctx) {
+        // 简单的像素马里奥绘制
+        const x = Math.floor(this.x);
+        const y = Math.floor(this.y);
+        const w = this.width;
+        const h = this.height;
+
+        this.animTimer++;
+        const isWalking = this.vx !== 0 && this.onGround;
+        const walkFrame = isWalking ? Math.floor(this.animTimer / 5) % 3 : 0;
+        
+        ctx.save();
+        if (!this.facingRight) {
+            // 修复翻转逻辑：围绕中心翻转
+            const cx = x + w / 2;
+            const cy = y + h / 2;
+            ctx.translate(cx, cy);
+            ctx.scale(-1, 1);
+            ctx.translate(-cx, -cy);
+        }
+        
+        // 身体
+        ctx.fillStyle = '#2040c0'; // 蓝色背带裤
+        // 简单的腿部动画
+        let legOffset = walkFrame === 1 ? -2 : 0;
+        ctx.fillRect(x + 4, y + 16 + legOffset, 18, 14 - legOffset);
+        
+        // 衬衫
+        ctx.fillStyle = '#e70012'; // 红色
+        ctx.fillRect(x + 2, y + 8, 22, 12);
+        
+        // 头
+        ctx.fillStyle = '#fccfa0'; // 皮肤
+        ctx.fillRect(x + 4, y, 18, 16);
+        
+        // 帽子
+        ctx.fillStyle = '#e70012';
+        ctx.fillRect(x + 2, y, 24, 6);
+        ctx.fillRect(x + 14, y + 4, 14, 2); // 帽檐
+
+        // 头发/胡子
+        ctx.fillStyle = '#402000';
+        if (this.facingRight) {
+            ctx.fillRect(x + 16, y + 10, 8, 4); // 胡子
+            ctx.fillRect(x + 6, y + 6, 4, 6); // 鬓角
+        } else {
+             // 翻转逻辑已由 scale 处理，只需画右向的
+             ctx.fillRect(x + 16, y + 10, 8, 4); 
+             ctx.fillRect(x + 6, y + 6, 4, 6); 
+        }
+
+        ctx.restore();
+    }
+}
+
+/**
+ * 敌人类 (板栗仔)
+ */
+class Goomba extends Entity {
+    constructor(x, y) {
+        super(x, y, 30, 30);
+        this.vx = -1.5;
+        this.color = '#8f4f30';
+        this.animTimer = 0;
+    }
+
+    die(game) {
+        this.markedForDeletion = true;
+        game.addParticle(this.x + 15, this.y + 15, '#fff', 0, 0); // 烟雾
+        // 压扁效果通过粒子或状态处理，这里直接消失
+    }
+
+    draw(ctx) {
+        const x = Math.floor(this.x);
+        const y = Math.floor(this.y);
+        
+        this.animTimer++;
+        const walkFrame = Math.floor(this.animTimer / 10) % 2;
+
+        // 身体（蘑菇状）
+        ctx.fillStyle = this.color;
+        
+        // 头部圆弧
+        ctx.beginPath();
+        ctx.moveTo(x + 4, y + 20);
+        ctx.bezierCurveTo(x + 4, y, x + 26, y, x + 26, y + 20);
+        ctx.lineTo(x + 26, y + 24);
+        ctx.lineTo(x + 4, y + 24);
+        ctx.fill();
+
+        // 茎/脚
+        ctx.fillStyle = '#000';
+        if (walkFrame === 0) {
+            ctx.fillRect(x + 4, y + 22, 10, 8);
+            ctx.fillRect(x + 18, y + 22, 10, 8);
+        } else {
+            ctx.fillRect(x + 2, y + 22, 10, 8);
+            ctx.fillRect(x + 20, y + 22, 10, 8);
+        }
+
+        // 眼睛
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(x + 8, y + 8, 6, 8);
+        ctx.fillRect(x + 18, y + 8, 6, 8);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(x + 10, y + 10, 2, 4);
+        ctx.fillRect(x + 20, y + 10, 2, 4);
+    }
+}
+
+class Coin extends Entity {
+    constructor(x, y) {
+        super(x + 8, y + 8, 16, 16);
+        this.baseY = y + 8;
+        this.wobble = Math.random() * Math.PI * 2;
+    }
+
+    update(game) {
+        this.wobble += 0.1;
+        this.y = this.baseY + Math.sin(this.wobble) * 3;
+    }
+
+    collect(game) {
+        this.markedForDeletion = true;
+        game.score += 200;
+        game.coins++;
+    }
+
+    draw(ctx) {
+        ctx.fillStyle = '#ffd700';
+        ctx.beginPath();
+        // 简单的旋转效果：改变宽度
+        const w = 8 + Math.abs(Math.sin(this.wobble)) * 8;
+        ctx.ellipse(this.x + 8, this.y + 8, w/2, 10, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#d4af37';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+}
+
+/**
+ * 瓦片类
+ */
+class Tile {
+    constructor(x, y, size, type) {
+        this.x = x;
+        this.y = y;
+        this.width = size;
+        this.height = size;
+        this.type = type; // ground, brick, question, wall
+        this.markedForDeletion = false;
+    }
+
+    draw(ctx, game) {
+        const x = this.x;
+        const y = this.y;
+        const s = this.width;
+
+        if (this.type === 'ground') {
+            ctx.fillStyle = game.colors.ground;
+            ctx.fillRect(x, y, s, s);
+            // 纹理细节
+            ctx.fillStyle = '#a03808';
+            ctx.fillRect(x + 4, y + 4, 4, 4);
+            ctx.fillRect(x + 12, y + 16, 4, 4);
+            ctx.fillStyle = '#000';
+            ctx.globalAlpha = 0.1;
+            ctx.fillRect(x, y, s, 2); // 顶部高光
+            ctx.globalAlpha = 1.0;
+        } else if (this.type === 'brick') {
+            ctx.fillStyle = game.colors.brick;
+            ctx.fillRect(x, y, s, s);
+            ctx.fillStyle = '#000'; // 砖缝
+            ctx.fillRect(x, y + 8, s, 2);
+            ctx.fillRect(x, y + 20, s, 2);
+            ctx.fillRect(x + 16, y, 2, 8);
+            ctx.fillRect(x + 8, y + 8, 2, 12);
+            ctx.fillRect(x + 24, y + 8, 2, 12);
+            ctx.fillRect(x + 16, y + 20, 2, 12);
+        } else if (this.type === 'question') {
+            ctx.fillStyle = game.colors.block;
+            ctx.fillRect(x, y, s, s);
+            ctx.fillStyle = '#b86020'; // 边框
+            ctx.fillRect(x, y, s, 2);
+            ctx.fillRect(x, y+s-2, s, 2);
+            ctx.fillRect(x, y, 2, s);
+            ctx.fillRect(x+s-2, y, 2, s);
+            ctx.fillStyle = '#5c2800'; // 问号
+            ctx.font = 'bold 24px monospace';
+            ctx.fillText('?', x + 9, y + 24);
+        } else if (this.type === 'wall') {
+            ctx.fillStyle = '#b86020'; // 用过的方块
+            ctx.fillRect(x, y, s, s);
+            ctx.strokeStyle = '#5c2800';
+            ctx.strokeRect(x, y, s, s);
+        } else if (this.type.startsWith('pipe')) {
+            ctx.fillStyle = game.colors.pipe;
+            if (this.type.includes('Dark')) ctx.fillStyle = game.colors.pipeDark;
+            ctx.fillRect(x, y, s, s);
+            ctx.strokeStyle = '#005000';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(x, y, s, s);
+            // 简单高光
+            ctx.fillStyle = '#a0e040';
+            ctx.fillRect(x + 4, y, 4, s);
+        } else if (this.type === 'flagpole') {
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(x + 12, y, 8, s);
+        } else if (this.type === 'flagtop') {
+             ctx.fillStyle = '#3cb043'; // 绿色顶
+             ctx.beginPath();
+             ctx.arc(x + 16, y + 16, 8, 0, Math.PI * 2);
+             ctx.fill();
+        }
+    }
+}
+
+/**
+ * 粒子特效
+ */
+class Particle {
+    constructor(x, y, color, vx, vy) {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.color = color;
+        this.life = 60;
+        this.gravity = 0.4;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy += this.gravity;
+        this.life--;
+    }
+
+    draw(ctx) {
+        ctx.fillStyle = this.color;
+        ctx.globalAlpha = this.life / 60;
+        ctx.fillRect(this.x, this.y, 6, 6);
+        ctx.globalAlpha = 1.0;
+    }
+}
+
+// 关卡设计 (字符映射)
+// # 地面, B 砖块, ? 问号, W 硬墙, P/p/[/] 水管, E 敌人, C 金币, @ 玩家, F 旗杆, T 旗顶
+const level1 = `
+.........................................................................................................................
+.........................................................................................................................
+.........................................................................................................................
+.........................................................................................................................
+........................................................................................................T................
+.................................................................CC.....................................F................
+.............................???................................BBBB....................................F................
+.............................???...............................B....B.......................T...........F................
+............................BBBBB........C.....C.....C.........B....B.......................F...........F................
+...........................B.....B.............................B....B..........C.....C......F...........F................
+.......?........?..........B.....B.............................B....B.......................F...........F................
+...........................B.....B......Pp.....................B....B.......................F...........F................
+...........................B.....B......[].....................B....B.......................F...........F................
+@..................E.......B.....B......[].........E...........B....B.....E.......E.........F...........F................
+#######################...########......##.......#####.........######.....#############.....#...........#................
+#######################...########......##.......#####.........######.....#############.....#...........#................
+`;
+
+// 初始化游戏
+const game = new Game();
+
+</script>
+</body>
+</html>
